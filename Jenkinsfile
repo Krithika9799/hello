@@ -8,27 +8,27 @@ pipeline {
     }
 
     stages {
-        stage("git-checkout") {
+
+        stage('git-checkout') {
             steps {
                 checkout scm
             }
         }
 
-        stage("image-build") {
+        stage('image-build') {
             steps {
                 script {
                     env.IMAGE_TAG = new Date().format("yyyy-MM-dd-HHmmss")
-                    env.FULL_IMAGE = "${env.IMAGE_NAME}:${env.IMAGE_TAG}"
                 }
 
                 bat '''
                     "%DOCKER_PATH%\\docker.exe" version
-                    "%DOCKER_PATH%\\docker.exe" build -t "%FULL_IMAGE%" .
+                    "%DOCKER_PATH%\\docker.exe" build -t "%IMAGE_NAME%:%IMAGE_TAG%" .
                 '''
             }
         }
 
-        stage("docker login") {
+        stage('docker login') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -39,24 +39,32 @@ pipeline {
                 ]) {
                     bat '''
                         @echo off
-                        echo %DOCKER_PASSWORD% | "%DOCKER_PATH%\\docker.exe" login -u %DOCKER_USERNAME% --password-stdin
+                        echo %DOCKER_PASSWORD% | "%DOCKER_PATH%\\docker.exe" login -u "%DOCKER_USERNAME%" --password-stdin
                     '''
                 }
             }
         }
 
-        stage("docker push") {
+        stage('docker push') {
             steps {
                 bat '''
-                    "%DOCKER_PATH%\\docker.exe" push "%FULL_IMAGE%"
+                    "%DOCKER_PATH%\\docker.exe" push "%IMAGE_NAME%:%IMAGE_TAG%"
                 '''
             }
         }
     }
 
     post {
+        success {
+            echo 'Pipeline completed successfully! Docker image built and pushed to Docker Hub.'
+        }
+
+        failure {
+            echo 'Pipeline failed. Please check the Console Output for details.'
+        }
+
         always {
-            echo "Pipeline execution completed."
+            echo 'Pipeline execution completed.'
         }
     }
 }
