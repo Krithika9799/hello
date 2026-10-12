@@ -22,7 +22,7 @@ pipeline {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'docker_cred', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                        sh "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
+                        bat "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
                     }
                 }
             }
@@ -30,8 +30,8 @@ pipeline {
         stage("docker push") {
             steps {
                 script {
-                    sh "docker build -t ${env.full_image} ."
-                    sh "docker push ${env.full_image}"
+                    bat "docker build -t ${env.full_image} ."
+                    bat "docker push ${env.full_image}"
                 }
             }
         }
