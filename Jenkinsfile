@@ -8,27 +8,33 @@ pipeline {
     }
 
     stages {
-
-        stage('git-checkout') {
+        stage('Git Checkout') {
             steps {
                 checkout scm
             }
         }
 
-        stage('image-build') {
+        stage('Generate Image Tag') {
             steps {
                 script {
                     env.IMAGE_TAG = new Date().format("yyyy-MM-dd-HHmmss")
                 }
 
+                echo "Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
                 bat '''
-                    "%DOCKER_PATH%\\docker.exe" version
-                    "%DOCKER_PATH%\\docker.exe" build -t "%IMAGE_NAME%:%IMAGE_TAG%" .
+                    "%DOCKER_PATH%\\docker.exe" build ^
+                    -t "%IMAGE_NAME%:%IMAGE_TAG%" ^
+                    -t "%IMAGE_NAME%:latest" .
                 '''
             }
         }
 
-        stage('docker login') {
+        stage('Docker Login') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -37,18 +43,37 @@ pipeline {
                         passwordVariable: 'DOCKER_PASSWORD'
                     )
                 ]) {
-                    bat '''
-                        @echo off
-                        echo %DOCKER_PASSWORD% | "%DOCKER_PATH%\\docker.exe" login -u "%DOCKER_USERNAME%" --password-stdin
+                    powershell '''
+                        $ErrorActionPreference = 'Stop'
+
+                        $env:DOCKER_PASSWORD |
+                            & "$env:DOCKER_PATH\\docker.exe" login `
+                                -u $env:DOCKER_USERNAME --password-stdin
+
+                        if ($LASTEXITCODE -ne 0) {
+                            exit $LASTEXITCODE
+                        }
                     '''
                 }
             }
         }
 
-        stage('docker push') {
+        stage('Docker Push') {
             steps {
                 bat '''
                     "%DOCKER_PATH%\\docker.exe" push "%IMAGE_NAME%:%IMAGE_TAG%"
+                    if errorlevel 1 exit /b %ERRORLEVEL%
+
+                    "%DOCKER_PATH%\\docker.exe" push "%IMAGE_NAME%:latest"
+                    if errorlevel 1 exit /b %ERRORLEVEL%
+                '''
+            }
+        }
+
+        stage('Docker Logout') {
+            steps {
+                bat '''
+                    "%DOCKER_PATH%\\docker.exe" logout
                 '''
             }
         }
@@ -56,15 +81,13 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline completed successfully! Docker image built and pushed to Docker Hub.'
+            echo "Pipeline completed successfully!"
+            echo "Pushed image: ${IMAGE_NAME}:${IMAGE_TAG}"
+            echo "Latest image: ${IMAGE_NAME}:latest"
         }
 
         failure {
-            echo 'Pipeline failed. Please check the Console Output for details.'
-        }
-
-        always {
-            echo 'Pipeline execution completed.'
+            echo "Pipeline failed. Please check the Console Output."
         }
     }
 }
