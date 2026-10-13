@@ -1,40 +1,43 @@
-
 pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "krithikan99/hello"
+        IMAGE_NAME  = "krithikan99/hello"
         DOCKER_PATH = "C:\\Users\\admin\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin"
+
+        // Isolates Docker's config/credentials per build. Avoids credential-helper
+        // problems when Jenkins runs as a different Windows user than "admin".
+        DOCKER_CONFIG = "${env.WORKSPACE}\\.docker"
     }
 
     stages {
-        stage('Git Checkout') {
+        stage("git-checkout") {
             steps {
                 checkout scm
             }
         }
 
-        stage('Generate Image Tag') {
+        stage("image-build") {
             steps {
                 script {
-                    env.IMAGE_TAG = new Date().format("yyyy-MM-dd-HHmmss")
+                    env.IMAGE_TAG  = new Date().format("yyyy-MM-dd-HHmmss")
+                    env.FULL_IMAGE = "${env.IMAGE_NAME}:${env.IMAGE_TAG}"
                 }
 
-                echo "Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
-            }
-        }
+                powershell '''
+                    $docker = "$env:DOCKER_PATH\\docker.exe"
 
-        stage('Docker Build') {
-            steps {
-                bat '''
-                    "%DOCKER_PATH%\\docker.exe" build ^
-                    -t "%IMAGE_NAME%:%IMAGE_TAG%" ^
-                    -t "%IMAGE_NAME%:latest" .
+                    & $docker version
+                    if ($LASTEXITCODE -ne 0) { throw "docker version failed" }
+
+                    & $docker build -t $env:FULL_IMAGE .
+                    if ($LASTEXITCODE -ne 0) { throw "docker build failed" }
                 '''
             }
         }
 
-        stage('Docker Login') {
+        // TEMPORARY: remove once login works. Prints lengths only, never the secret.
+        stage("debug-creds") {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -44,50 +47,47 @@ pipeline {
                     )
                 ]) {
                     powershell '''
-                        $ErrorActionPreference = 'Stop'
-
-                        $env:DOCKER_PASSWORD |
-                            & "$env:DOCKER_PATH\\docker.exe" login `
-                                -u $env:DOCKER_USERNAME --password-stdin
-
-                        if ($LASTEXITCODE -ne 0) {
-                            exit $LASTEXITCODE
-                        }
+                        Write-Host "whoami: $(whoami)"
+                        Write-Host "User length: $($env:DOCKER_USERNAME.Length)"
+                        Write-Host "Pass length: $($env:DOCKER_PASSWORD.Length)"
                     '''
                 }
             }
         }
 
-        stage('Docker Push') {
+        stage("docker-login-push") {
             steps {
-                bat '''
-                    "%DOCKER_PATH%\\docker.exe" push "%IMAGE_NAME%:%IMAGE_TAG%"
-                    if errorlevel 1 exit /b %ERRORLEVEL%
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'docker_cred',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
+                    // Single-quoted ''' so Groovy never interpolates the secret;
+                    // PowerShell reads it from the environment instead.
+                    powershell '''
+                        $docker = "$env:DOCKER_PATH\\docker.exe"
 
-                    "%DOCKER_PATH%\\docker.exe" push "%IMAGE_NAME%:latest"
-                    if errorlevel 1 exit /b %ERRORLEVEL%
-                '''
-            }
-        }
+                        $env:DOCKER_PASSWORD | & $docker login -u $env:DOCKER_USERNAME --password-stdin
+                        if ($LASTEXITCODE -ne 0) { throw "Docker login failed" }
 
-        stage('Docker Logout') {
-            steps {
-                bat '''
-                    "%DOCKER_PATH%\\docker.exe" logout
-                '''
+                        & $docker push $env:FULL_IMAGE
+                        if ($LASTEXITCODE -ne 0) { throw "Docker push failed" }
+                    '''
+                }
             }
         }
     }
 
     post {
-        success {
-            echo "Pipeline completed successfully!"
-            echo "Pushed image: ${IMAGE_NAME}:${IMAGE_TAG}"
-            echo "Latest image: ${IMAGE_NAME}:latest"
-        }
-
-        failure {
-            echo "Pipeline failed. Please check the Console Output."
+        always {
+            // Always log out so credentials don't linger in the workspace config.
+            powershell '''
+                & "$env:DOCKER_PATH\\docker.exe" logout
+                exit 0
+            '''
+            echo "Pipeline execution completed."
         }
     }
 }
