@@ -57,25 +57,21 @@ pipeline {
 
         stage("docker-login-push") {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'krithikan99',
-                        usernameVariable: 'DOCKER_USERNAME',
-                        passwordVariable: 'DOCKER_PASSWORD'
-                    )
-                ]) {
-                    // Single-quoted ''' so Groovy never interpolates the secret;
-                    // PowerShell reads it from the environment instead.
-                    powershell '''
-                        $docker = "$env:DOCKER_PATH\\docker.exe"
+                bat '''
+                    "%DOCKER_PATH%\\docker.exe" push "%IMAGE_NAME%:%IMAGE_TAG%"
+                    if errorlevel 1 exit /b %ERRORLEVEL%
 
-                        $env:DOCKER_PASSWORD | & $docker login -u $env:DOCKER_USERNAME --password-stdin
-                        if ($LASTEXITCODE -ne 0) { throw "Docker login failed" }
+                    "%DOCKER_PATH%\\docker.exe" push "%IMAGE_NAME%:latest"
+                    if errorlevel 1 exit /b %ERRORLEVEL%
+                '''
+            }
+        }
 
-                        & $docker push $env:FULL_IMAGE
-                        if ($LASTEXITCODE -ne 0) { throw "Docker push failed" }
-                    '''
-                }
+        stage('Docker Logout') {
+            steps {
+                bat '''
+                    "%DOCKER_PATH%\\docker.exe" logout
+                '''
             }
         }
     }
